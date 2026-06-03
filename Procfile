@@ -1,1 +1,1 @@
-worker: python trading_bot_v10.py
+worker: python trading_bot_v12.py
