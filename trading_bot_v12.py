@@ -280,7 +280,10 @@ def tg_status(state, portfolio_val, pnl_pct, sharpe, sortino, profit_factor, win
 
 _binance_fail_count = 0  # diagnostico: loga so as primeiras falhas
 
-def b_get(path, params={}, base="https://api.binance.com"):
+# Endpoint de DADOS PUBLICOS da Binance (sem bloqueio geografico que o api.binance.com tem)
+BINANCE_DATA_HOST = "https://data-api.binance.vision"
+
+def b_get(path, params={}, base=BINANCE_DATA_HOST):
     global _binance_fail_count
     try:
         r = requests.get(f"{base}{path}", params=params, timeout=8)
