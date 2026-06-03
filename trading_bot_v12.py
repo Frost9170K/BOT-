@@ -278,12 +278,24 @@ def tg_status(state, portfolio_val, pnl_pct, sharpe, sortino, profit_factor, win
 #  BINANCE API
 # ══════════════════════════════════════════
 
+_binance_fail_count = 0  # diagnostico: loga so as primeiras falhas
+
 def b_get(path, params={}, base="https://api.binance.com"):
+    global _binance_fail_count
     try:
         r = requests.get(f"{base}{path}", params=params, timeout=8)
-        return r.json() if r.status_code == 200 else None
+        if r.status_code == 200:
+            return r.json()
+        # Diagnostico: mostra o motivo real das primeiras 5 falhas
+        if _binance_fail_count < 5:
+            _binance_fail_count += 1
+            print(Fore.RED + f"  [BINANCE FALHOU] {path} -> HTTP {r.status_code}: {r.text[:180]}")
+        return None
     except Exception as e:
-        log.warning(f"GET {path}: {e}"); return None
+        if _binance_fail_count < 5:
+            _binance_fail_count += 1
+            print(Fore.RED + f"  [BINANCE ERRO] {path} -> {type(e).__name__}: {str(e)[:150]}")
+        return None
 
 def b_signed(method, path, params={}):
     try:
