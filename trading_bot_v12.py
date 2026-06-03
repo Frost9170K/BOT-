@@ -2395,7 +2395,7 @@ def get_recent_liquidations(sym: str = "BTC") -> dict:
                      {"symbol": f"{sym}USDT", "autoCloseType": "LIQUIDATION", "limit": 100},
                      FAPI)
         if not data:
-            return {"total_usd": 0, "long_usd": 0, "short_usd": 0, "signal": "NEUTRAL"}
+            return {"total_usd": 0, "long_usd": 0, "short_usd": 0, "signal": "NEUTRAL", "alert": False}
         now_ms = int(time.time() * 1000)
         cutoff = now_ms - LIQ_LOOKBACK_HOURS * 3600 * 1000
         recent = [d for d in data if d.get("time", 0) > cutoff]
