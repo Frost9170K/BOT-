@@ -84,6 +84,7 @@ MAX_DRAWDOWN_PCT     = 0.12        # v10: reduzido de 15% para 12%
 MAX_DAILY_LOSS_PCT   = 0.04        # v10: reduzido de 5% para 4%
 MAX_WEEKLY_LOSS_PCT  = 0.08
 MAX_CONSEC_LOSSES    = 2           # v10: reduzido de 3 para 2
+CIRCUIT_BREAKER_COOLDOWN_HOURS = 48   # v12 rev: auto-religa o circuit breaker apos N horas de descanso
 TIME_EXIT_HOURS      = 48          # v10: reduzido de 72h para 48h
 DCA_TRIGGER_PCT      = 0.07        # v10: aumentado de 5% para 7%
 DCA_MAX_TIMES        = 1           # v10: máx 1 DCA por posição
@@ -1282,18 +1283,48 @@ def check_circuit_breakers(state):
     today = datetime.now().strftime("%Y-%m-%d"); week = datetime.now().strftime("%Y-%W")
     if state.get("daily_reset") != today: state["daily_loss"] = 0.0; state["daily_reset"] = today
     if state.get("weekly_reset") != week: state["weekly_loss"] = 0.0; state["weekly_reset"] = week
+
     portfolio = state["balance"]
     for sym, pos in state["positions"].items():
         p = get_price(sym) or pos["entry_price"]; portfolio += pos["qty"] * p
+
+    # ── AUTO-RESET do circuit breaker global ──
+    # Se a trava esta ligada, verifica se ja passou o tempo de descanso.
+    if state.get("circuit_breaker"):
+        cb_time = state.get("circuit_breaker_time")
+        if not cb_time:
+            # Estado antigo sem timestamp: grava agora pra comecar a contar
+            state["circuit_breaker_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            save_state(state)
+            print(Fore.RED + f"  🔴 CB ATIVO — auto-reset em {CIRCUIT_BREAKER_COOLDOWN_HOURS}h")
+            return True
+        elapsed_h = (datetime.now() - datetime.strptime(cb_time, "%Y-%m-%d %H:%M")).total_seconds() / 3600
+        if elapsed_h >= CIRCUIT_BREAKER_COOLDOWN_HOURS:
+            # Religa sozinho e zera o pico pro nivel atual (evita re-trip imediato)
+            state["circuit_breaker"] = False
+            state["circuit_breaker_time"] = None
+            state["peak_balance"] = portfolio
+            state["consec_losses"] = 0
+            print(Fore.GREEN + f"\n  ✓ AUTO-RESET: circuit breaker religado apos {CIRCUIT_BREAKER_COOLDOWN_HOURS}h de descanso. Retomando operacoes.")
+            save_state(state)
+            # nao retorna True: deixa o ciclo seguir normal
+        else:
+            restante = CIRCUIT_BREAKER_COOLDOWN_HOURS - elapsed_h
+            print(Fore.RED + f"  🔴 CB ATIVO — auto-reset em {restante:.1f}h (ou edite circuit_breaker=false no JSON)")
+            return True
+
+    # Atualiza o pico so depois da logica de auto-reset
     if portfolio > state.get("peak_balance", PAPER_BALANCE):
         state["peak_balance"] = portfolio
     peak = state.get("peak_balance", PAPER_BALANCE)
     drawdown = (peak - portfolio) / peak if peak else 0
+
     if drawdown >= MAX_DRAWDOWN_PCT:
         if not state.get("circuit_breaker"):
             state["circuit_breaker"] = True
+            state["circuit_breaker_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
             msg = f"Drawdown: {drawdown*100:.1f}%"
-            print(Fore.RED + f"\n  🔴 CIRCUIT BREAKER GLOBAL — {msg}")
+            print(Fore.RED + f"\n  🔴 CIRCUIT BREAKER GLOBAL — {msg} (auto-reset em {CIRCUIT_BREAKER_COOLDOWN_HOURS}h)")
             tg_alert("🔴 CIRCUIT BREAKER GLOBAL", msg, urgent=True)
             save_state(state)
         return True
@@ -1309,8 +1340,6 @@ def check_circuit_breakers(state):
     if state.get("consec_losses", 0) >= MAX_CONSEC_LOSSES:
         print(Fore.RED + f"  🔴 {MAX_CONSEC_LOSSES} PERDAS CONSECUTIVAS — Pausando.")
         state["consec_losses"] = 0; return True
-    if state.get("circuit_breaker"):
-        print(Fore.RED + "\n  🔴 CB ATIVO. Edite circuit_breaker=false no JSON."); return True
     return False
 
 def check_correlation_guard(state, symbol):
